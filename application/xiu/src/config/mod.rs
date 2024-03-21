@@ -37,6 +37,7 @@ impl Config {
                 pull: None,
                 push: None,
                 auth: None,
+                bilibili: None,
             });
         }
 
@@ -104,7 +105,16 @@ pub struct RtmpConfig {
     pub pull: Option<RtmpPullConfig>,
     pub push: Option<Vec<RtmpPushConfig>>,
     pub auth: Option<AuthConfig>,
+    pub bilibili: Option<BiliBiliConfig>,
 }
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct BiliBiliConfig {
+    pub server_addres: String,
+    pub query: String,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct RtmpPullConfig {
     pub enabled: bool,
