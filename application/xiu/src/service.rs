@@ -1,5 +1,5 @@
 use commonlib::auth::AuthType;
-use rtmp::remuxer::RtmpRemuxer;
+use rtmp::{relay::bilibili_push_client::BiliBiliPushClient, remuxer::RtmpRemuxer};
 
 use crate::config::{AuthConfig, AuthSecretConfig};
 
@@ -123,6 +123,28 @@ impl Service {
             };
 
             let producer = stream_hub.get_hub_event_sender();
+
+            /*static push */
+            if let Some(push_value) = &rtmp_cfg_value.bilibili {
+                if push_value.enabled {
+                    log::info!("start bilibili rtmp push client..");
+
+                    let url = format!("{}{}", push_value.server_addres, push_value.query);
+
+                    let mut bilibili_push_client = BiliBiliPushClient::new(
+                        url,
+                        stream_hub.get_client_event_consumer(),
+                        producer.clone(),
+                    );
+                    tokio::spawn(async move {
+                        if let Err(err) = bilibili_push_client.run().await {
+                            log::error!("bilibili push client error {}", err);
+                        }
+                    });
+
+                    stream_hub.set_rtmp_push_enabled(true);
+                }
+            }
 
             /*static push */
             if let Some(push_cfg_values) = &rtmp_cfg_value.push {

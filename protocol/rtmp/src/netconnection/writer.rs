@@ -235,11 +235,16 @@ impl NetConnection {
     pub async fn write_create_stream(
         &mut self,
         transaction_id: &f64,
+        search: Option<String>,
     ) -> Result<(), NetConnectionError> {
         self.amf0_writer
             .write_string(&String::from("createStream"))?;
         self.amf0_writer.write_number(transaction_id)?;
         self.amf0_writer.write_null()?;
+
+        if let Some(ref search) = search {
+            self.amf0_writer.write_string(search)?;
+        }
 
         self.write_chunk().await
     }
