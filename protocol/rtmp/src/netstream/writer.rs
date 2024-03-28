@@ -89,12 +89,18 @@ impl NetStreamWriter {
         &mut self,
         transaction_id: &f64,
         stream_name: &String,
+        search: Option<String>,
     ) -> Result<(), NetStreamError> {
         self.amf0_writer
             .write_string(&String::from("releaseStream"))?;
         self.amf0_writer.write_number(transaction_id)?;
         self.amf0_writer.write_null()?;
-        self.amf0_writer.write_string(stream_name)?;
+
+        if let Some(search) = search {
+            self.amf0_writer.write_string(&search)?;
+        } else {
+            self.amf0_writer.write_string(stream_name)?;
+        }
 
         self.write_chunk(0).await
     }
@@ -103,11 +109,17 @@ impl NetStreamWriter {
         &mut self,
         transaction_id: &f64,
         stream_name: &String,
+        search: Option<String>,
     ) -> Result<(), NetStreamError> {
         self.amf0_writer.write_string(&String::from("FCPublish"))?;
         self.amf0_writer.write_number(transaction_id)?;
         self.amf0_writer.write_null()?;
-        self.amf0_writer.write_string(stream_name)?;
+
+        if let Some(search) = search {
+            self.amf0_writer.write_string(&search)?;
+        } else {
+            self.amf0_writer.write_string(stream_name)?;
+        }
 
         self.write_chunk(0).await
     }
@@ -145,12 +157,17 @@ impl NetStreamWriter {
         transaction_id: &f64,
         stream_name: &String,
         stream_type: &String,
+        search: Option<String>,
     ) -> Result<(), NetStreamError> {
         self.amf0_writer.write_string(&String::from("publish"))?;
         self.amf0_writer.write_number(transaction_id)?;
         self.amf0_writer.write_null()?;
-        self.amf0_writer.write_string(stream_name)?;
+
+        if let Some(search) = search {
+            self.amf0_writer.write_string(&search)?;
+        }
         self.amf0_writer.write_string(stream_type)?;
+        self.amf0_writer.write_string(stream_name)?;
 
         self.write_chunk(0).await
     }

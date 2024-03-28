@@ -1,15 +1,21 @@
 use {
     super::errors::ClientError,
-    crate::{
-        session::client_session::{ClientSession, ClientType},
-        utils::RtmpUrlParser,
-    },
+    crate::{session::bilibili_client_session::BiliBiliClientSession, utils::RtmpUrlParser},
     streamhub::{
         define::{BroadcastEvent, BroadcastEventReceiver, StreamHubEventSender},
         stream::StreamIdentifier,
     },
     tokio::net::TcpStream,
 };
+
+//c -> s SetChunkSize
+//c -> s connect
+//s -> c window
+//s -> c setPeer
+//c -> s amf0 command releaseStream
+//c -> s amf0 command FCPublish
+//s -> c _result
+//c -> s amf0 command publish
 
 pub struct BiliBiliPushClient {
     url: String,
@@ -58,14 +64,19 @@ impl BiliBiliPushClient {
                         );
                         let stream = TcpStream::connect(address.clone()).await?;
 
-                        let mut client_session = ClientSession::new(
+                        let search = rtmp
+                            .query
+                            .as_ref()
+                            .and_then(|query| Some(format!("?{}", query)));
+
+                        let mut client_session = BiliBiliClientSession::new(
                             stream,
-                            ClientType::Publish,
                             address.clone(),
                             app_name,
                             stream_name,
                             self.channel_event_producer.clone(),
                             0,
+                            search,
                         );
 
                         tokio::spawn(async move {

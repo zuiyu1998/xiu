@@ -59,13 +59,8 @@ enum ClientSessionPublishState {
     CreateStream,
     PublishingContent,
 }
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq)]
-pub enum ClientType {
-    Play,
-    Publish,
-}
-pub struct ClientSession {
+
+pub struct BiliBiliClientSession {
     io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
     common: Common,
     handshaker: SimpleHandshakeClient,
@@ -77,22 +72,22 @@ pub struct ClientSession {
     raw_stream_name: String,
     stream_name: String,
     state: ClientSessionState,
-    client_type: ClientType,
     sub_app_name: Option<String>,
     sub_stream_name: Option<String>,
     /*configure how many gops will be cached.*/
     gop_num: usize,
+    search: Option<String>,
 }
 
-impl ClientSession {
+impl BiliBiliClientSession {
     pub fn new(
         stream: TcpStream,
-        client_type: ClientType,
         raw_domain_name: String,
         app_name: String,
         raw_stream_name: String,
         event_producer: StreamHubEventSender,
         gop_num: usize,
+        search: Option<String>,
     ) -> Self {
         let remote_addr = if let Ok(addr) = stream.peer_addr() {
             log::info!("server session: {}", addr.to_string());
@@ -104,11 +99,7 @@ impl ClientSession {
         let tcp_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpIO::new(stream));
         let net_io = Arc::new(Mutex::new(tcp_io));
 
-        let packetizer = if client_type == ClientType::Publish {
-            Some(ChunkPacketizer::new(Arc::clone(&net_io)))
-        } else {
-            None
-        };
+        let packetizer = Some(ChunkPacketizer::new(Arc::clone(&net_io)));
 
         let common = Common::new(packetizer, event_producer, SessionType::Client, remote_addr);
         let (stream_name, _) = RtmpUrlParser::parse_stream_name_with_query(&raw_stream_name);
@@ -123,10 +114,10 @@ impl ClientSession {
             raw_stream_name,
             stream_name,
             state: ClientSessionState::Handshake,
-            client_type,
             sub_app_name: None,
             sub_stream_name: None,
             gop_num,
+            search,
         }
     }
 
@@ -146,8 +137,7 @@ impl ClientSession {
                 }
                 ClientSessionState::CreateStream => {
                     log::info!("[C -> S] CreateStream...");
-                    self.send_create_stream(&(define::TRANSACTION_ID_CREATE_STREAM as f64))
-                        .await?;
+                    self.send_create_stream(&(4 as f64)).await?;
                     self.state = ClientSessionState::WaitStateChange;
                 }
                 ClientSessionState::Play => {
@@ -302,7 +292,11 @@ impl ClientSession {
                     log::info!("[C <- S] on_result_create_stream...");
                     self.on_result_create_stream()?;
                 }
-                _ => {}
+                _ => {
+                    self.state = ClientSessionState::PublishingContent;
+
+                    log::info!("[C <- S] transaction_id {}", transaction_id);
+                }
             },
             "_error" => {
                 self.on_error()?;
@@ -337,23 +331,10 @@ impl ClientSession {
         );
         properties.app = Some(self.app_name.clone());
 
-        match self.client_type {
-            ClientType::Play => {
-                properties.flash_ver = Some("LNX 9,0,124,2".to_string());
-                properties.tc_url = Some(url.clone());
-                properties.fpad = Some(false);
-                properties.capabilities = Some(15_f64);
-                properties.audio_codecs = Some(4071_f64);
-                properties.video_codecs = Some(252_f64);
-                properties.video_function = Some(1_f64);
-            }
-            ClientType::Publish => {
-                properties.pub_type = Some("nonprivate".to_string());
-                properties.flash_ver = Some("FMLE/3.0 (compatible; xiu)".to_string());
-                properties.fpad = Some(false);
-                properties.tc_url = Some(url.clone());
-            }
-        }
+        properties.pub_type = Some("nonprivate".to_string());
+        properties.flash_ver = Some("FMLE/3.0 (compatible; xiu)".to_string());
+        properties.fpad = Some(false);
+        properties.tc_url = Some(url.clone());
 
         netconnection
             .write_connect(transaction_id, &properties)
@@ -365,7 +346,7 @@ impl ClientSession {
     pub async fn send_create_stream(&mut self, transaction_id: &f64) -> Result<(), SessionError> {
         let mut netconnection = NetConnection::new(Arc::clone(&self.io));
         netconnection
-            .write_create_stream(transaction_id, None)
+            .write_create_stream(transaction_id, self.search.clone())
             .await?;
 
         Ok(())
@@ -392,7 +373,12 @@ impl ClientSession {
     ) -> Result<(), SessionError> {
         let mut netstream = NetStreamWriter::new(Arc::clone(&self.io));
         netstream
-            .write_publish(transaction_id, stream_name, stream_type, None)
+            .write_publish(
+                transaction_id,
+                stream_name,
+                stream_type,
+                self.search.clone(),
+            )
             .await?;
 
         Ok(())
@@ -458,18 +444,10 @@ impl ClientSession {
 
         let mut netstream = NetStreamWriter::new(Arc::clone(&self.io));
         netstream
-            .write_release_stream(
-                &(define::TRANSACTION_ID_CONNECT as f64),
-                &self.stream_name,
-                None,
-            )
+            .write_release_stream(&(2 as f64), &self.stream_name, self.search.clone())
             .await?;
         netstream
-            .write_fcpublish(
-                &(define::TRANSACTION_ID_CONNECT as f64),
-                &self.stream_name,
-                None,
-            )
+            .write_fcpublish(&(3 as f64), &self.stream_name, self.search.clone())
             .await?;
 
         self.state = ClientSessionState::CreateStream;
@@ -478,14 +456,7 @@ impl ClientSession {
     }
 
     pub fn on_result_create_stream(&mut self) -> Result<(), SessionError> {
-        match self.client_type {
-            ClientType::Play => {
-                self.state = ClientSessionState::Play;
-            }
-            ClientType::Publish => {
-                self.state = ClientSessionState::PublishingContent;
-            }
-        }
+        self.state = ClientSessionState::PublishingContent;
         Ok(())
     }
 
@@ -506,7 +477,7 @@ impl ClientSession {
     }
 
     pub async fn on_set_peer_bandwidth(&mut self) -> Result<(), SessionError> {
-        self.send_window_acknowledgement_size(5000000).await?;
+        self.state = ClientSessionState::CreateStream;
 
         Ok(())
     }
